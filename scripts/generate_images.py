@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 inkflow — Article to Image Cards
-https://github.com/gljx898989/inkflow
+https://github.com/Ficere/inkflow
 
 Converts a plain-text article + cover image into a ZIP of numbered PNGs:
   01.png  — cover card (title + keywords)
