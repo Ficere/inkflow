@@ -9,7 +9,10 @@ Converts a plain-text article + cover image into a ZIP of numbered PNGs:
 
 Usage:
   python generate_images.py <article_path> <cover_img_path> <title> \
-      <highlights_comma_sep> <output_zip> [color_scheme]
+      <highlights_comma_sep> <output_zip> [color_scheme] \
+      [--copy-md <publish_copy.md>] [--title-options "t1|t2|t3"] \
+      [--cover-copy "one-line cover lead"] [--tags "#tag1 #tag2"] \
+      [--include-copy-in-zip]
 
 Color schemes: warm (default), cool_blue, sage_green, dusty_rose, amber, slate
 
@@ -23,6 +26,7 @@ import os
 import sys
 import zipfile
 import re
+from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 # ─── Canvas ──────────────────────────────────────────────────────────────────
@@ -39,12 +43,14 @@ PARA_SPACING = 44
 # ─── Fonts ───────────────────────────────────────────────────────────────────
 FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "..", "..", "fonts")
-# Fallback to workspace/fonts if running from workspace root
+# Fallback to the current user's workspace instead of a hard-coded /home/user.
 if not os.path.isdir(FONTS_DIR):
-    FONTS_DIR = "/home/user/workspace/fonts"
+    FONTS_DIR = os.path.join(os.path.expanduser("~"), "workspace", "fonts")
 
 SANS_FONT      = os.path.join(FONTS_DIR, "Alibaba-PuHuiTi-Regular.ttf")
 SANS_BOLD_FONT = os.path.join(FONTS_DIR, "Alibaba-PuHuiTi-Bold.ttf")
+WINDOWS_CJK_FONT = "/mnt/c/Windows/Fonts/msyh.ttc"
+WINDOWS_CJK_BOLD = "/mnt/c/Windows/Fonts/msyhbd.ttc"
 
 # ─── Color Schemes ───────────────────────────────────────────────────────────
 COLOR_SCHEMES = {
@@ -102,19 +108,36 @@ DEFAULT_SCHEME = COLOR_SCHEMES["warm"]
 
 
 # ─── Font Loader ─────────────────────────────────────────────────────────────
+def resolve_font(regular=True):
+    """Return an available CJK font path for Linux/WSL/macOS-like environments."""
+    primary = SANS_FONT if regular else SANS_BOLD_FONT
+    windows = WINDOWS_CJK_FONT if regular else WINDOWS_CJK_BOLD
+    candidates = [
+        primary,
+        windows,
+        "/mnt/c/Windows/Fonts/simhei.ttf",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    raise FileNotFoundError(
+        "No usable CJK font found. Install Alibaba PuHuiTi into "
+        f"{FONTS_DIR}, or run on a system with Chinese fonts."
+    )
+
+
 def load_fonts():
-    for path in [SANS_FONT, SANS_BOLD_FONT]:
-        if not os.path.exists(path):
-            raise FileNotFoundError(
-                f"Font not found: {path}\n"
-                "Download Alibaba PuHuiTi — see SKILL.md Step 2."
-            )
+    regular_font = resolve_font(regular=True)
+    bold_font = resolve_font(regular=False)
     return {
-        "body":           ImageFont.truetype(SANS_FONT,      BODY_FONT_SIZE),
-        "cover_title":    ImageFont.truetype(SANS_BOLD_FONT, 100),
-        "cover_subtitle": ImageFont.truetype(SANS_FONT,      42),
-        "cover_label":    ImageFont.truetype(SANS_FONT,      36),
-        "page_num":       ImageFont.truetype(SANS_FONT,      28),
+        "body":           ImageFont.truetype(regular_font, BODY_FONT_SIZE),
+        "cover_title":    ImageFont.truetype(bold_font,    100),
+        "cover_subtitle": ImageFont.truetype(regular_font, 42),
+        "cover_label":    ImageFont.truetype(regular_font, 36),
+        "page_num":       ImageFont.truetype(regular_font, 28),
     }
 
 
@@ -313,31 +336,80 @@ def create_text_pages(article_text, fonts, output_dir, start_num=2, scheme=None)
 
 
 # ─── Main Entry ──────────────────────────────────────────────────────────────
-def create_article_zip(article_path, cover_img_path, title, highlights,
-                       output_zip, color_scheme="warm"):
-    """
-    Full pipeline: read article → render cover card + body pages → ZIP.
+def read_article_body(article_path):
+    """Read a text article and return the public body text.
 
-    Returns total page count (including cover).
+    The first non-empty line is treated as the source/title line and skipped.
+    Content after a standalone `---` separator is treated as notes/metadata and
+    omitted from public outputs.
     """
     with open(article_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
-    # Skip first non-empty line (title) and use remainder as body
     body_start = 0
+    seen_title = False
     for i, line in enumerate(lines):
-        if i == 0:
+        if not seen_title and line.strip():
+            seen_title = True
             continue
-        if line.strip():
+        if seen_title and line.strip():
             body_start = i
             break
     article_text = "".join(lines[body_start:]).strip()
+    return re.split(r"\n---\s*\n", article_text)[0].strip()
 
-    # Strip trailing metadata after '---' separator
-    article_text = re.split(r"\n---\s*\n", article_text)[0].strip()
+
+def build_publish_copy(title, title_options, cover_copy, article_text,
+                       highlights, tags, output_zip):
+    """Build WeChat-ready publishing copy to accompany PNG cards."""
+    options = [x.strip() for x in (title_options or []) if x.strip()] or [title]
+    title_lines = "\n".join(f"{i}. {t}" for i, t in enumerate(options, 1))
+    highlight_text = " / ".join(h for h in highlights if h)
+    parts = [
+        f"# {title}",
+        "",
+        "## 标题备选",
+        "",
+        title_lines,
+        "",
+        "## 推荐标题",
+        "",
+        title,
+        "",
+    ]
+    if cover_copy:
+        parts.extend(["## 封面文案", "", cover_copy.strip(), ""])
+    if highlight_text:
+        parts.extend(["## 关键词", "", highlight_text, ""])
+    parts.extend(["## 正文", "", article_text.strip(), ""])
+    if tags:
+        parts.extend(["## 标签", "", tags.strip(), ""])
+    parts.extend([
+        "## 配图",
+        "",
+        f"图片包：{Path(output_zip).name}",
+        "建议按 01.png、02.png ... 的顺序插入正文。",
+        "",
+    ])
+    return "\n".join(parts).strip() + "\n"
+
+
+def create_article_zip(article_path, cover_img_path, title, highlights,
+                       output_zip, color_scheme="warm", copy_md=None,
+                       title_options=None, cover_copy="", tags="",
+                       include_copy_in_zip=False):
+    """
+    Full pipeline: read article → render cover card + body pages → ZIP.
+
+    Optionally also writes a public-facing Markdown copy bundle containing
+    title alternatives, cover copy, article body, tags, and upload notes.
+
+    Returns total page count (including cover).
+    """
+    article_text = read_article_body(article_path)
 
     scheme  = COLOR_SCHEMES.get(color_scheme, DEFAULT_SCHEME)
-    tmp_dir = "/home/user/workspace/tmp_inkflow_images"
+    tmp_dir = os.path.join(str(Path(output_zip).resolve().parent), "tmp_inkflow_images")
     os.makedirs(tmp_dir, exist_ok=True)
     for fname in os.listdir(tmp_dir):
         os.remove(os.path.join(tmp_dir, fname))
@@ -348,11 +420,54 @@ def create_article_zip(article_path, cover_img_path, title, highlights,
     num_body = create_text_pages(article_text, fonts, tmp_dir,
                                  start_num=2, scheme=scheme)
 
+    copy_path = None
+    if copy_md:
+        copy_path = Path(copy_md)
+        copy_path.parent.mkdir(parents=True, exist_ok=True)
+        copy_path.write_text(
+            build_publish_copy(title, title_options or [title], cover_copy,
+                               article_text, highlights, tags, output_zip),
+            encoding="utf-8",
+        )
+
     with zipfile.ZipFile(output_zip, "w", zipfile.ZIP_DEFLATED) as zf:
         for fname in sorted(os.listdir(tmp_dir)):
             zf.write(os.path.join(tmp_dir, fname), fname)
+        if include_copy_in_zip and copy_path and copy_path.exists():
+            zf.write(copy_path, copy_path.name)
 
     return num_body + 1  # body pages + cover
+
+
+def parse_optional_args(args):
+    opts = {
+        "copy_md": None,
+        "title_options": None,
+        "cover_copy": "",
+        "tags": "",
+        "include_copy_in_zip": False,
+    }
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--copy-md" and i + 1 < len(args):
+            opts["copy_md"] = args[i + 1]
+            i += 2
+        elif arg == "--title-options" and i + 1 < len(args):
+            opts["title_options"] = [x.strip() for x in args[i + 1].split("|") if x.strip()]
+            i += 2
+        elif arg == "--cover-copy" and i + 1 < len(args):
+            opts["cover_copy"] = args[i + 1]
+            i += 2
+        elif arg == "--tags" and i + 1 < len(args):
+            opts["tags"] = args[i + 1]
+            i += 2
+        elif arg == "--include-copy-in-zip":
+            opts["include_copy_in_zip"] = True
+            i += 1
+        else:
+            raise ValueError(f"Unknown or incomplete option: {arg}")
+    return opts
 
 
 if __name__ == "__main__":
@@ -360,19 +475,26 @@ if __name__ == "__main__":
         print(
             "Usage: python generate_images.py "
             "<article_path> <cover_img_path> <title> "
-            "<highlights_comma_sep> <output_zip> [color_scheme]"
+            "<highlights_comma_sep> <output_zip> [color_scheme] "
+            "[--copy-md <publish_copy.md>] [--title-options 't1|t2|t3'] "
+            "[--cover-copy <text>] [--tags <tags>] [--include-copy-in-zip]"
         )
         sys.exit(1)
 
     article_path   = sys.argv[1]
     cover_img_path = sys.argv[2]
     title          = sys.argv[3]
-    highlights     = [h.strip() for h in sys.argv[4].split(",")]
+    highlights     = [h.strip() for h in sys.argv[4].split(",") if h.strip()]
     output_zip     = sys.argv[5]
-    color_scheme   = sys.argv[6] if len(sys.argv) > 6 else "warm"
+    color_scheme   = sys.argv[6] if len(sys.argv) > 6 and not sys.argv[6].startswith("--") else "warm"
+    option_start   = 7 if len(sys.argv) > 6 and not sys.argv[6].startswith("--") else 6
+    opts = parse_optional_args(sys.argv[option_start:])
 
     total = create_article_zip(
-        article_path, cover_img_path, title,
-        highlights, output_zip, color_scheme
+        article_path, cover_img_path, title, highlights, output_zip,
+        color_scheme=color_scheme, **opts
     )
-    print(f"完成！共{total}张图片")
+    msg = f"完成！共{total}张图片"
+    if opts.get("copy_md"):
+        msg += f"；发布文案：{opts['copy_md']}"
+    print(msg)

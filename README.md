@@ -1,8 +1,8 @@
 # 🖼️ inkflow / 墨流
 
-把任意文章或文案，变成一套美观的公众号 / 小红书图文包。
+把任意文章或文案，变成一套美观的公众号 / 小红书图文包，并配套输出可直接发布的正文与标题备选。
 
-Turn any article or copywriting into a beautiful, scroll-ready WeChat / Xiaohongshu image card set.
+Turn any article or copywriting into a beautiful, scroll-ready WeChat / Xiaohongshu image card set, with ready-to-publish body copy and title alternatives.
 
 遵循 [Agent Skills 开放标准](https://agentskills.io)，兼容 Claude Code、Cursor、GitHub Copilot、Codex、Windsurf、Gemini CLI、Perplexity Computer 等 30+ AI Agent 平台。
 
@@ -64,6 +64,7 @@ git clone https://github.com/Ficere/inkflow.git
 |------|------|
 | `cover_<主题>.png` | AI 生成的 16:9 封面插画（无文字，纯场景） |
 | `images_<主题>.zip` | 编号图片包：`01.png` 封面卡 + `02–NN.png` 正文页 |
+| `publish_copy_<主题>.md` | 公众号发布文案：标题备选、推荐标题、封面文案、正文、标签、配图说明 |
 
 图片规格：**1080 × 1920 px · 阿里巴巴普惠体 · 6 种配色**
 
@@ -74,6 +75,8 @@ git clone https://github.com/Ficere/inkflow.git
 | **AI 封面生成** | 根据文章主题自动生成 16:9 插画封面，支持传入 IP 形象参考图 |
 | **封面卡排版** | 封面图 + 渐变过渡 + 居中标题 + 关键词导读，一页抓住读者 |
 | **正文分页** | 自动断行、分段、分页，字号 52px，行距 1.65×，适合手机滑读 |
+| **发布文案** | 除 PNG 外输出公众号可复制正文、推荐标题、标题备选、封面文案与标签 |
+| **批量工作流** | `generate_up_distill_cards.py` 可把一批 Markdown 草稿渲染成逐篇文件夹 + 总合集 |
 | **6 种配色** | warm / cool_blue / sage_green / dusty_rose / amber / slate |
 | **元数据隔离** | 文章内 `---` 分隔线后的内容不会出现在图片里，可放写作备注 |
 
@@ -113,7 +116,12 @@ python scripts/generate_images.py \
   "你的标题" \
   "关键词1,关键词2,关键词3" \
   输出.zip \
-  warm
+  warm \
+  --copy-md publish_copy.md \
+  --title-options "标题1|标题2|标题3" \
+  --cover-copy "封面上的一句话" \
+  --tags "#标签1 #标签2" \
+  --include-copy-in-zip
 ```
 
 <details>
@@ -134,13 +142,36 @@ python scripts/generate_images.py \
 
 </details>
 
+### 批量生成：PNG + 公众号正文 + 标题备选
+
+如果你的草稿是 Markdown 文件夹，并包含 `## 备选标题`、`## 封面文案`、`## 正文`、`## 标签` 等小节，可使用批量脚本：
+
+```bash
+python scripts/generate_up_distill_cards.py \
+  /path/to/drafts \
+  /path/to/avatar.png \
+  /path/to/output \
+  --zip /path/to/output_bundle.zip
+```
+
+输出结构：
+
+- 每篇文章一个文件夹
+- `01-封面.png` + `02-正文.png` ...
+- 每篇一份 `公众号发布文案.md`
+- 根目录一份 `公众号发布文案合集.md`
+- 根目录一份 `生成清单.csv`，包含标题备选、公开分类、PNG 张数与发布文案路径
+
+批量脚本会把来源/内部备注类信息隔离在草稿里，公开文件以「个人思考笔记 / 原创笔记」口吻呈现。
+
 ## 目录结构 / Structure
 
 ```
 inkflow/
 ├── SKILL.md                  # 技能入口（Agent 自动读取）
 ├── scripts/
-│   └── generate_images.py    # 图片渲染脚本（Pillow，可独立运行）
+│   ├── generate_images.py    # 单篇图片渲染脚本（Pillow，可独立运行）
+│   └── generate_up_distill_cards.py # 批量生成 PNG + 公众号发布文案
 ├── references/
 │   └── color-schemes.md      # 6 种配色的完整 RGB 值与选色指南
 └── README.md
