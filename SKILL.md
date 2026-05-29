@@ -192,6 +192,34 @@ Then briefly summarize: number of cards generated, color theme used, and any tip
 
 See `references/color-schemes.md` for full RGB values.
 
+## Use Cases & Examples
+
+> All examples below use fictional information for demonstration only. See `references/use-cases.md` for full walkthroughs.
+
+### Example 1 — Social commentary essay → WeChat publishing bundle
+
+Article about "pretending to go to work" phenomenon, warm theme, keywords: "identity trap, coffee-shop freelancer, facing reality".
+
+Produces: cover card + 3 body cards + publish copy with title alternatives and tags.
+
+### Example 2 — Tech analysis → Xiaohongshu image set
+
+Article about "information density in the LLM era", cool_blue theme, keywords: "AI augmentation, inward growth, personal vibe".
+
+Produces: cool-blue cover + 4 body pages + Xiaohongshu-style short copy with emoji suggestions.
+
+### Example 3 — Personal narrative → scroll-friendly image flow
+
+Article about "leaving a big city", dusty_rose theme, keywords: "choice vs letting go, night rides, re-arranging life".
+
+Produces: dusty-rose artistic cover + 5 body pages + image upload notes.
+
+### Example 4 — Batch UP-content production
+
+3 Markdown drafts with `备选标题`, `封面文案`, `正文`, `标签` sections fed into `generate_up_distill_cards.py`.
+
+Produces: per-draft folders + numbered PNGs + per-article publish copy + root-level manifest CSV.
+
 ## Notes
 
 - Article text can be in any language; layout engine handles CJK and Latin equally.

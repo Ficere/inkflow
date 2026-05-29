@@ -87,6 +87,82 @@ def wrap_cjk(draw, text: str, fnt, max_width: int) -> List[str]:
     return out
 
 
+def smart_wrap_title(draw, text: str, fnt, max_width: int, max_lines: int = 4) -> List[str]:
+    """Wrap large cover titles with better Chinese reading rhythm.
+
+    The generic CJK wrapper is greedy and can split words awkwardly at line ends
+    (e.g. 系/统, 常/常). For cover titles, choose line breaks globally so all
+    lines fit while preferring punctuation/phrase boundaries and avoiding lone
+    repeated characters or common two-character words being split.
+    """
+    text = re.sub(r'`([^`]+)`', r'\1', text.strip())
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+    if not text:
+        return ['']
+    n = len(text)
+    # Candidate break positions are character offsets 1..n-1. Prefer breaks
+    # after punctuation and before common conjunction/adverb starts.
+    phrase_starts = set('越常是而因但不先别要把才往真看做从为')
+    bad_pairs = {'系统', '常常', '问题', '组织', '企业', '公司', '孩子', '财富', '自由', '投资', '经济', '普通', '能力', '制度', '决定', '焦虑', '机会'}
+
+    from functools import lru_cache
+
+    @lru_cache(None)
+    def width(s):
+        return text_w(draw, s, fnt)
+
+    @lru_cache(None)
+    def best(start: int, lines_left: int):
+        if start >= n:
+            return (0, [])
+        tail = text[start:]
+        if width(tail) <= max_width:
+            return (0, [tail])
+        if lines_left <= 1:
+            return (10**9, [tail])
+
+        best_score, best_lines = 10**9, None
+        for end in range(start + 1, n):
+            seg = text[start:end]
+            if width(seg) > max_width:
+                break
+            # Need at least one char for the remainder.
+            if end >= n:
+                continue
+            score = 0
+            line_len = end - start
+            remaining = n - end
+            # Prefer reasonably full lines but avoid pushing a single word/char.
+            fullness = width(seg) / max_width
+            score += int((1 - fullness) * 80)
+            if text[end - 1] in '，、；：。？！!?':
+                score -= 60
+            if text[end] in phrase_starts:
+                score -= 18
+            if line_len <= 3:
+                score += 80
+            if remaining <= 2:
+                score += 100
+            # Avoid splitting common two-char words and duplicated words.
+            pair = text[end-1:end+1]
+            if pair in bad_pairs:
+                score += 180
+            if end - 1 >= 0 and end < n and text[end - 1] == text[end]:
+                score += 180
+            # Avoid orphan punctuation at the beginning of the next line.
+            if text[end] in '，、；：。？！!?':
+                score += 200
+            child_score, child_lines = best(end, lines_left - 1)
+            total = score + child_score
+            if total < best_score:
+                best_score, best_lines = total, [seg] + child_lines
+        if best_lines is None:
+            return (10**9, wrap_cjk(draw, text[start:], fnt, max_width)[:lines_left])
+        return (best_score, best_lines)
+
+    return best(0, max_lines)[1][:max_lines]
+
+
 def md_section(text: str, name: str) -> str:
     m = re.search(rf'^##\s+{re.escape(name)}\s*$([\s\S]*?)(?=^##\s+|\Z)', text, flags=re.M)
     return m.group(1).strip() if m else ''
@@ -227,7 +303,7 @@ def create_cover(item, theme, fonts, avatar, out_path: Path, total: int):
     draw_round_rect(draw, (MARGIN_X, y, MARGIN_X+cw+56, y+58), 29, theme['accent'])
     draw.text((MARGIN_X+28, y+12), cat, fill=(255,255,255), font=fonts['small_b'])
     y += 105
-    for line in wrap_cjk(draw, item['title'], fonts['title'], W - 2*MARGIN_X)[:4]:
+    for line in smart_wrap_title(draw, item['title'], fonts['title'], W - 2*MARGIN_X, max_lines=4):
         draw.text((MARGIN_X, y), line, fill=theme['ink'], font=fonts['title'])
         y += 114
     y += 18
