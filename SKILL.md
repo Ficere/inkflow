@@ -4,7 +4,7 @@ description: "Turn any article or copywriting into beautiful WeChat / Xiaohongsh
 license: MIT
 metadata:
   author: gljx898989
-  version: '1.0'
+  version: '1.1.0'
 ---
 
 # inkflow — Article to Image Cards
